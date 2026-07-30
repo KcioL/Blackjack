@@ -39,7 +39,7 @@ body {
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 15px;
   width: 100%;
   max-width: 400px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
@@ -47,7 +47,7 @@ body {
 
 .lobby-box h1 {
   color: #ffd700;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
   text-transform: uppercase;
   letter-spacing: 2px;
 }
@@ -76,13 +76,6 @@ body {
   border-color: #ffd700;
 }
 
-.lobby-actions {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
-  margin-top: 10px;
-}
-
 /* ================== GAME CONTAINER ================== */
 .game-container {
   width: 100%;
@@ -105,27 +98,6 @@ body {
   border-bottom: 2px solid #ffd700;
   gap: 10px;
 }
-
-.game-settings {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.game-settings label {
-  font-weight: bold;
-  color: #ffd700;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.game-settings input {
-  padding: 6px; border-radius: 6px;
-  border: 1px solid #444; background: #2a2a2a; color: #fff; text-align: center;
-}
-#num-players { width: 70px; }
 
 .casino-table {
   width: 100%;
