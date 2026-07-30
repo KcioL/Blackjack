@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blackjack - Base En Ligne</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ÉCRAN DE SALON (LOBBY) -->
+  <div id="lobby-screen" class="lobby-screen">
+    <div class="lobby-box">
+      <h1>Blackjack En Ligne</h1>
+      
+      <label>
+        Votre Pseudo :
+        <input type="text" id="lobby-name" maxlength="15" placeholder="Ex: Loïck" value="Loïck">
+      </label>
+      
+      <label>
+        Code de la partie :
+        <input type="text" id="lobby-code" maxlength="6" placeholder="Laissez vide pour créer" style="text-transform: uppercase;">
+      </label>
+
+      <p id="lobby-error" class="hidden" style="color: #e74c3c; margin: 0; font-weight: bold;"></p>
+
+      <div class="lobby-actions">
+        <button id="btn-create-room" class="btn btn-start">Créer un salon</button>
+        <button id="btn-join-room" class="btn btn-secondary">Rejoindre</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ÉCRAN DE JEU (Caché par défaut) -->
+  <div id="game-screen" class="game-container hidden">
+    <header class="game-header">
+      <div style="display: flex; flex-direction: column; gap: 5px;">
+        <h1>Blackjack</h1>
+        <span style="color: #ffd700; font-weight: bold; font-size: 0.9rem;">Salon : <span id="display-room-code">----</span></span>
+      </div>
+      
+      <div class="game-settings" id="host-settings">
+        <label>
+          Joueurs (1-4) :
+          <input type="number" id="num-players" min="1" max="4" value="1">
+        </label>
+      </div>
+    </header>
+
+    <div class="casino-table">
+      <!-- Zone Croupier -->
+      <div class="player-zone dealer-zone">
+        <div class="player-info">
+          <span class="player-name">Croupier</span>
+          <span class="player-chips">Score: <span id="dealer-score">?</span></span>
+        </div>
+        <div class="cards-container" id="dealer-cards"></div>
+      </div>
+
+      <!-- Zone Centrale -->
+      <div class="center-zone">
+        <div class="game-message" id="game-message">En attente du lancement par l'Hôte...</div>
+      </div>
+
+      <!-- Zones des joueurs (Générées par JS) -->
+      <div class="players-container" id="players-container"></div>
+    </div>
+
+    <!-- Contrôles Actions -->
+    <div class="controls">
+      <button id="btn-start" class="btn btn-start">Nouvelle Main</button>
+      
+      <div id="betting-controls" class="action-buttons hidden">
+        <label style="color: #ffd700; font-weight: bold; margin-right: 10px;">Mise (€) :
+          <input type="number" id="bet-input" min="10" step="10" value="50" style="width: 70px; padding: 5px; border-radius: 5px; background: #2a2a2a; color: white; border: 1px solid #444;">
+        </label>
+        <button id="btn-bet" class="btn btn-start">Valider la mise</button>
+      </div>
+
+      <div id="action-buttons" class="action-buttons hidden">
+        <button id="btn-hit" class="btn btn-secondary">Tirer (Hit)</button>
+        <button id="btn-stand" class="btn btn-danger">Rester (Stand)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Le type="module" est crucial pour que les imports Firebase fonctionnent -->
+  <script type="module" src="script.js"></script>
+</body>
+</html>
