@@ -18,17 +18,27 @@
         <input type="text" id="lobby-name" maxlength="15" placeholder="Ex: Loïck" value="Loïck">
       </label>
       
-      <label>
-        Code de la partie :
-        <input type="text" id="lobby-code" maxlength="6" placeholder="Laissez vide pour créer" style="text-transform: uppercase;">
-      </label>
+      <div class="lobby-actions" style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
+        <!-- Zone Création -->
+        <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; border: 1px solid #444;">
+          <label style="margin-bottom: 10px;">
+            Créer un salon (1 à 4 joueurs) :
+            <input type="number" id="lobby-num-players" min="1" max="4" value="2">
+          </label>
+          <button id="btn-create-room" class="btn btn-start" style="width: 100%;">Créer la partie</button>
+        </div>
+
+        <!-- Zone Rejoindre -->
+        <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; border: 1px solid #444;">
+          <label style="margin-bottom: 10px;">
+            Rejoindre un salon :
+            <input type="text" id="lobby-code" maxlength="6" placeholder="CODE" style="text-transform: uppercase;">
+          </label>
+          <button id="btn-join-room" class="btn btn-secondary" style="width: 100%;">Rejoindre</button>
+        </div>
+      </div>
 
       <p id="lobby-error" class="hidden" style="color: #e74c3c; margin: 0; font-weight: bold;"></p>
-
-      <div class="lobby-actions">
-        <button id="btn-create-room" class="btn btn-start">Créer un salon</button>
-        <button id="btn-join-room" class="btn btn-secondary">Rejoindre</button>
-      </div>
     </div>
   </div>
 
@@ -38,13 +48,6 @@
       <div style="display: flex; flex-direction: column; gap: 5px;">
         <h1>Blackjack</h1>
         <span style="color: #ffd700; font-weight: bold; font-size: 0.9rem;">Salon : <span id="display-room-code">----</span></span>
-      </div>
-      
-      <div class="game-settings" id="host-settings">
-        <label>
-          Joueurs (1-4) :
-          <input type="number" id="num-players" min="1" max="4" value="1">
-        </label>
       </div>
     </header>
 
@@ -60,7 +63,7 @@
 
       <!-- Zone Centrale -->
       <div class="center-zone">
-        <div class="game-message" id="game-message">En attente du lancement par l'Hôte...</div>
+        <div class="game-message" id="game-message">En attente de joueurs...</div>
       </div>
 
       <!-- Zones des joueurs (Générées par JS) -->
@@ -69,7 +72,7 @@
 
     <!-- Contrôles Actions -->
     <div class="controls">
-      <button id="btn-start" class="btn btn-start">Nouvelle Main</button>
+      <button id="btn-start" class="btn btn-start hidden">Lancer la partie</button>
       
       <div id="betting-controls" class="action-buttons hidden">
         <label style="color: #ffd700; font-weight: bold; margin-right: 10px;">Mise (€) :
