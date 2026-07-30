@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Blackjack</title>
+  <title>Blackjack - Base En Ligne</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,11 +11,11 @@
   <!-- ÉCRAN DE SALON (LOBBY) -->
   <div id="lobby-screen" class="lobby-screen">
     <div class="lobby-box">
-      <h1>Blackjack</h1>
+      <h1>Blackjack En Ligne</h1>
       
       <label>
         Votre Pseudo :
-        <input type="text" id="lobby-name" maxlength="15" placeholder="Ex: Loïck" value="">
+        <input type="text" id="lobby-name" maxlength="15" placeholder="Ex: Loïck" value="Loïck">
       </label>
       
       <div class="lobby-actions" style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
@@ -75,10 +75,11 @@
       <button id="btn-start" class="btn btn-start hidden">Lancer la partie</button>
       
       <div id="betting-controls" class="action-buttons hidden">
-        <label style="color: #ffd700; font-weight: bold; margin-right: 10px;">Mise (€) :
+        <label id="bet-label" style="color: #ffd700; font-weight: bold; margin-right: 10px;">Mise (€) :
           <input type="number" id="bet-input" min="10" step="10" value="50" style="width: 70px; padding: 5px; border-radius: 5px; background: #2a2a2a; color: white; border: 1px solid #444;">
         </label>
         <button id="btn-bet" class="btn btn-start">Valider la mise</button>
+        <button id="btn-reload" class="btn btn-secondary hidden">Recharger (+1000€)</button>
       </div>
 
       <div id="action-buttons" class="action-buttons hidden">
@@ -88,7 +89,6 @@
     </div>
   </div>
 
-  <!-- Le type="module" est crucial pour que les imports Firebase fonctionnent -->
   <script type="module" src="script.js"></script>
 </body>
 </html>
