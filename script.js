@@ -48,7 +48,7 @@ let playerName = "";
 let isHost = false;
 let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
 let gameState = null;
-let isDealing = false;
+let isDealing = false; 
 
 // ==========================================
 // 1. GESTION DU LOBBY
@@ -227,7 +227,7 @@ async function checkPhase() {
   if (gameState.phase === 'waiting') {
     const count = gameState.turnOrder.length;
     
-    // VERIFICATION DU SALON PLEIN (Correction de ton premier problème)
+    // VERIFICATION DU SALON PLEIN ET MESSAGE D'ATTENTE
     if (count >= gameState.maxPlayers) {
       if (isHost) {
         elGameMessage.textContent = "Tout le monde est là ! Vous pouvez lancer la partie.";
@@ -448,7 +448,7 @@ function createDeck() {
 function createCardElement(card) {
   const cardEl = document.createElement('div');
   cardEl.classList.add('card', 'deal-animation');
-  if(!card) return cardEl; // Sécurité si la carte n'est pas trouvée
+  if(!card) return cardEl; // Sécurité
   
   const backFace = document.createElement('div');
   backFace.classList.add('card-face', 'card-back');
@@ -467,32 +467,30 @@ function createCardElement(card) {
   return cardEl;
 }
 
-// NOUVELLE FONCTION RENDER CARDS (Correction de ton deuxième problème)
 function renderCards(container, cards, hideSecond = false) {
   if (!cards) cards = [];
   
-  // 1. Retirer les cartes en trop (utile quand on lance une nouvelle main)
+  // On retire les cartes en trop si on recommence une nouvelle main
   while(container.children.length > cards.length) {
     container.removeChild(container.lastChild);
   }
   
-  // 2. Ajouter les cartes manquantes dans l'interface
+  // On ajoute les nouvelles cartes
   for(let i = container.children.length; i < cards.length; i++) {
     let cardEl = createCardElement(cards[i]);
     container.appendChild(cardEl);
+    
+    // Cette ligne force le navigateur à calculer la position de la carte AVANT d'ajouter la classe 'flipped'. 
+    // Ça garantit à 100% que l'animation de retournement va se lancer et qu'aucune carte ne restera bleue.
+    void cardEl.offsetWidth; 
   }
   
-  // 3. Forcer le bon affichage de TOUTES les cartes (retournée ou non)
+  // On s'assure que toutes les cartes ont la classe pour être face visible (sauf la 2ème du croupier)
   Array.from(container.children).forEach((cardEl, i) => {
     if (hideSecond && i === 1) {
-      cardEl.classList.remove('flipped'); // Cache la 2ème carte du croupier
+      cardEl.classList.remove('flipped');
     } else {
-      // On s'assure qu'elle est bien retournée (face visible) pour tout le monde
-      setTimeout(() => {
-        if (!cardEl.classList.contains('flipped')) {
-          cardEl.classList.add('flipped');
-        }
-      }, 30);
+      cardEl.classList.add('flipped');
     }
   });
 }
