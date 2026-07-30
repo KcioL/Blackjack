@@ -65,7 +65,8 @@ function generateRoomCode() {
 }
 
 btnCreateRoom.addEventListener('click', async () => {
-  playerName = lobbyName.value.trim() || "Joueur";
+  // Le créateur est toujours le Joueur 1 par défaut
+  playerName = lobbyName.value.trim() || "Joueur 1";
   const maxPlayers = parseInt(document.getElementById('lobby-num-players').value) || 2;
   roomCode = generateRoomCode();
   isHost = true;
@@ -78,7 +79,6 @@ btnCreateRoom.addEventListener('click', async () => {
       turnOrder: [myPlayerId],
       activeTurnIndex: 0,
       players: {
-        // Initialisation avec reloads à 0
         [myPlayerId]: { name: playerName, chips: 1000, bet: 0, status: 'active', reloads: 0 }
       }
     });
@@ -91,7 +91,7 @@ btnCreateRoom.addEventListener('click', async () => {
 });
 
 btnJoinRoom.addEventListener('click', async () => {
-  playerName = lobbyName.value.trim() || "Joueur";
+  let requestedName = lobbyName.value.trim();
   roomCode = lobbyCode.value.trim().toUpperCase();
   
   if (roomCode.length === 0) {
@@ -116,6 +116,9 @@ btnJoinRoom.addEventListener('click', async () => {
         lobbyError.classList.remove('hidden');
         return;
       }
+
+      // Si le champ est vide, on calcule dynamiquement le numéro du joueur
+      playerName = requestedName || `Joueur ${currentPlayersCount + 1}`;
 
       let newTurnOrder = data.turnOrder || [];
       newTurnOrder.push(myPlayerId);
@@ -341,7 +344,7 @@ btnReload.addEventListener('click', async () => {
   const myData = gameState.players[myPlayerId];
   const currentReloads = myData.reloads || 0;
   
-  // On ajoute 1000 jetons au solde restant (au cas où il resterait par ex 5€)
+  // On ajoute 1000 jetons au solde restant
   await update(ref(db, 'rooms/' + roomCode + '/players/' + myPlayerId), {
     chips: (myData.chips || 0) + 1000,
     reloads: currentReloads + 1
