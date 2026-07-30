@@ -12,7 +12,6 @@ const firebaseConfig = {
   appId: "1:655073109580:web:1d3900505b36075b7bb6e9"
 };
 
-// Initialisation de Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
@@ -22,7 +21,6 @@ const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'
 let deck = [];
 let players = [];
 let dealerCards = [];
-let globalChips = [1000, 1000, 1000, 1000];
 
 let activePlayerIndex = 0;
 let currentPhase = 'idle'; 
@@ -36,10 +34,8 @@ const btnCreateRoom = document.getElementById('btn-create-room');
 const btnJoinRoom = document.getElementById('btn-join-room');
 const lobbyError = document.getElementById('lobby-error');
 const displayRoomCode = document.getElementById('display-room-code');
-const hostSettings = document.getElementById('host-settings');
 
 // --- DOM : JEU ---
-const inputNumPlayers = document.getElementById('num-players');
 const elPlayersContainer = document.getElementById('players-container');
 const elDealerCards = document.getElementById('dealer-cards');
 const elDealerScore = document.getElementById('dealer-score');
@@ -58,9 +54,11 @@ const btnBet = document.getElementById('btn-bet');
 let roomCode = "";
 let playerName = "";
 let isHost = false;
+let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
+let isGameStarted = false; // Bloque la modification de l'UI de la table une fois en jeu
 
 // ==========================================
-// GESTION DU LOBBY AVEC FIREBASE
+// GESTION DU LOBBY ET SYNCHRONISATION
 // ==========================================
 function generateRoomCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -73,20 +71,25 @@ function generateRoomCode() {
 
 btnCreateRoom.addEventListener('click', async () => {
   playerName = lobbyName.value.trim() || "Joueur";
-  roomCode = lobbyCode.value.trim().toUpperCase() || generateRoomCode();
+  const maxPlayers = parseInt(document.getElementById('lobby-num-players').value) || 2;
+  roomCode = generateRoomCode();
   isHost = true;
   
   try {
-    // Création du salon dans la base de données Firebase
+    // On crée la salle avec le nombre max de joueurs défini par l'Hôte
     await set(ref(db, 'rooms/' + roomCode), {
-      phase: 'idle',
+      phase: 'waiting',
       host: playerName,
-      createdAt: Date.now()
+      maxPlayers: maxPlayers,
+      createdAt: Date.now(),
+      players: {
+        [myPlayerId]: { name: playerName, chips: 1000 }
+      }
     });
     enterGameRoom();
   } catch (error) {
     console.error(error);
-    lobbyError.textContent = "Erreur Firebase. Vérifie tes règles de sécurité.";
+    lobbyError.textContent = "Erreur de création du salon.";
     lobbyError.classList.remove('hidden');
   }
 });
@@ -96,15 +99,34 @@ btnJoinRoom.addEventListener('click', async () => {
   roomCode = lobbyCode.value.trim().toUpperCase();
   
   if (roomCode.length === 0) {
-    lobbyError.textContent = "Veuillez entrer un code de salon pour rejoindre.";
+    lobbyError.textContent = "Veuillez entrer un code de salon.";
     lobbyError.classList.remove('hidden');
     return;
   }
   
   try {
-    // Vérification de l'existence du salon dans Firebase
     const snapshot = await get(ref(db, 'rooms/' + roomCode));
     if (snapshot.exists()) {
+      const data = snapshot.val();
+      const currentPlayersCount = data.players ? Object.keys(data.players).length : 0;
+      
+      // Sécurité : Vérifier si la partie a commencé ou est pleine
+      if (data.phase !== 'waiting') {
+        lobbyError.textContent = "La partie a déjà commencé.";
+        lobbyError.classList.remove('hidden');
+        return;
+      }
+      if (currentPlayersCount >= data.maxPlayers) {
+        lobbyError.textContent = "Le salon est plein.";
+        lobbyError.classList.remove('hidden');
+        return;
+      }
+
+      // Ajout du joueur dans Firebase
+      await update(ref(db, 'rooms/' + roomCode + '/players'), {
+        [myPlayerId]: { name: playerName, chips: 1000 }
+      });
+
       isHost = false;
       enterGameRoom();
     } else {
@@ -113,7 +135,7 @@ btnJoinRoom.addEventListener('click', async () => {
     }
   } catch (error) {
     console.error(error);
-    lobbyError.textContent = "Erreur Firebase. Vérifie tes règles de sécurité.";
+    lobbyError.textContent = "Erreur Firebase.";
     lobbyError.classList.remove('hidden');
   }
 });
@@ -124,18 +146,93 @@ function enterGameRoom() {
   displayRoomCode.textContent = roomCode;
   lobbyError.classList.add('hidden');
   
-  if (!isHost) {
-    hostSettings.style.display = 'none';
-    btnStart.style.display = 'none';
-    elGameMessage.textContent = "En attente de l'hôte pour lancer la partie...";
-  } else {
-    elGameMessage.textContent = "Choisissez le nombre de joueurs et lancez la main.";
+  // Écoute des changements de la salle en temps réel
+  onValue(ref(db, 'rooms/' + roomCode), (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
+
+    const playerIds = Object.keys(data.players || {});
+    const currentPlayersCount = playerIds.length;
+
+    // On met à jour l'affichage des joueurs TANT QUE la partie n'a pas commencé
+    if (!isGameStarted) {
+      setupTableFromFirebase(data.players);
+
+      if (data.phase === 'waiting') {
+        elGameMessage.textContent = `En attente de joueurs... (${currentPlayersCount}/${data.maxPlayers})`;
+        
+        // Si le salon est plein
+        if (currentPlayersCount === data.maxPlayers) {
+          if (isHost) {
+            elGameMessage.textContent = "Tout le monde est là ! Vous pouvez lancer la partie.";
+            btnStart.classList.remove('hidden');
+          } else {
+            elGameMessage.textContent = "Tout le monde est là ! En attente de l'hôte pour lancer...";
+            btnStart.classList.add('hidden');
+          }
+        } else {
+          btnStart.classList.add('hidden');
+        }
+      } 
+      else if (data.phase === 'playing') {
+        // L'hôte a cliqué sur "Lancer la partie"
+        isGameStarted = true;
+        btnStart.classList.add('hidden');
+        currentPhase = 'betting';
+        activePlayerIndex = 0;
+        processBettingPhase();
+      }
+    }
+  });
+}
+
+// Transforme l'objet Firebase en un tableau "players" utilisable par le jeu
+function setupTableFromFirebase(playersObj) {
+  elPlayersContainer.innerHTML = '';
+  players = [];
+  
+  let i = 0;
+  for (const pId in playersObj) {
+    const pData = playersObj[pId];
+    
+    const pZone = document.createElement('div');
+    pZone.className = 'player-zone';
+    pZone.innerHTML = `
+      <div class="cards-container" id="p${i}-cards"></div>
+      <div class="player-info" id="p${i}-info">
+        <span class="player-name">${pData.name} ${pId === myPlayerId ? '(Vous)' : ''}</span>
+        <span class="player-chips">Score: <span id="p${i}-score">0</span> | <span id="p${i}-chips">${pData.chips}</span> €</span>
+        <span id="p${i}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
+      </div>
+    `;
+    elPlayersContainer.appendChild(pZone);
+
+    players.push({
+      id: i, firebaseId: pId, name: pData.name,
+      cards: [], bet: 0, chips: pData.chips,
+      elCards: document.getElementById(`p${i}-cards`),
+      elScore: document.getElementById(`p${i}-score`),
+      elChips: document.getElementById(`p${i}-chips`),
+      elBetDisplay: document.getElementById(`p${i}-bet`),
+      elInfo: document.getElementById(`p${i}-info`),
+      status: 'active'
+    });
+    i++;
   }
 }
 
+// L'hôte déclenche le début de la partie pour tout le monde
+btnStart.addEventListener('click', async () => {
+  await update(ref(db, 'rooms/' + roomCode), {
+    phase: 'playing'
+  });
+});
+
+
 // ==========================================
-// LOGIQUE DU BLACKJACK LOCAL (Prête à être synchronisée)
+// LOGIQUE DU BLACKJACK LOCAL
 // ==========================================
+
 function calculateScore(cards) {
   let score = 0, aces = 0;
   for (let card of cards) {
@@ -196,38 +293,6 @@ function revealCard(cardEl) {
   setTimeout(() => { cardEl.classList.add('flipped'); }, 50);
 }
 
-function setupTable(numPlayers) {
-  elPlayersContainer.innerHTML = '';
-  players = [];
-  
-  for (let i = 0; i < numPlayers; i++) {
-    let pName = (i === 0) ? playerName : `Joueur ${i + 1}`;
-    
-    const pZone = document.createElement('div');
-    pZone.className = 'player-zone';
-    pZone.innerHTML = `
-      <div class="cards-container" id="p${i}-cards"></div>
-      <div class="player-info" id="p${i}-info">
-        <span class="player-name">${pName}</span>
-        <span class="player-chips">Score: <span id="p${i}-score">0</span> | <span id="p${i}-chips">${globalChips[i]}</span> €</span>
-        <span id="p${i}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
-      </div>
-    `;
-    elPlayersContainer.appendChild(pZone);
-
-    players.push({
-      id: i, name: pName,
-      cards: [], bet: 0,
-      elCards: document.getElementById(`p${i}-cards`),
-      elScore: document.getElementById(`p${i}-score`),
-      elChips: document.getElementById(`p${i}-chips`),
-      elBetDisplay: document.getElementById(`p${i}-bet`),
-      elInfo: document.getElementById(`p${i}-info`),
-      status: 'active'
-    });
-  }
-}
-
 function updateScores(hideDealerCard = true) {
   players.forEach(p => p.elScore.textContent = calculateScore(p.cards));
   if (hideDealerCard && dealerCards.length > 0) elDealerScore.textContent = calculateScore([dealerCards[0]]);
@@ -241,18 +306,6 @@ function highlightActivePlayer() {
   }
 }
 
-btnStart.addEventListener('click', () => {
-  const numPlayers = parseInt(inputNumPlayers.value);
-  setupTable(numPlayers);
-  
-  btnStart.classList.add('hidden');
-  inputNumPlayers.disabled = true;
-  
-  activePlayerIndex = 0;
-  currentPhase = 'betting';
-  processBettingPhase();
-});
-
 function processBettingPhase() {
   if (activePlayerIndex >= players.length) {
     currentPhase = 'playing';
@@ -264,10 +317,10 @@ function processBettingPhase() {
   const p = players[activePlayerIndex];
   highlightActivePlayer();
   
-  elGameMessage.textContent = `${p.name} : Choisissez votre mise (Solde : ${globalChips[p.id]} €)`;
+  elGameMessage.textContent = `${p.name} : Choisissez votre mise (Solde : ${p.chips} €)`;
   
-  betInput.max = globalChips[p.id];
-  betInput.value = Math.min(50, globalChips[p.id]); 
+  betInput.max = p.chips;
+  betInput.value = Math.min(50, p.chips); 
 
   bettingControls.classList.remove('hidden');
   actionButtons.classList.add('hidden');
@@ -277,14 +330,14 @@ btnBet.addEventListener('click', () => {
   const p = players[activePlayerIndex];
   let chosenBet = parseInt(betInput.value);
   
-  if (chosenBet > globalChips[p.id] || chosenBet < 10) {
+  if (chosenBet > p.chips || chosenBet < 10) {
     alert("Mise invalide ou solde insuffisant.");
     return;
   }
 
   p.bet = chosenBet;
-  globalChips[p.id] -= chosenBet;
-  p.elChips.textContent = globalChips[p.id];
+  p.chips -= chosenBet;
+  p.elChips.textContent = p.chips;
   p.elBetDisplay.textContent = `Mise: ${chosenBet} €`;
 
   activePlayerIndex++;
@@ -416,14 +469,17 @@ function resolveBets(dScore) {
       }
     }
     
-    globalChips[p.id] += winnings;
-    p.elChips.textContent = globalChips[p.id];
+    p.chips += winnings;
+    p.elChips.textContent = p.chips;
   });
 
   elGameMessage.textContent = message;
   
   if (isHost) {
-    inputNumPlayers.disabled = false;
-    setTimeout(() => { btnStart.classList.remove('hidden'); }, 2000);
+    setTimeout(() => { 
+      // Reset logic to be implemented later for new rounds over Firebase
+      btnStart.classList.remove('hidden'); 
+      btnStart.textContent = "Relancer une main";
+    }, 2000);
   }
 }
