@@ -1,7 +1,7 @@
 :root {
-  var(--card-w): 60px;
-  var(--card-h): 88px;
-  var(--font-base): 1rem;
+  --card-w: 60px;
+  --card-h: 88px;
+  --font-base: 1rem;
 }
 
 * {
