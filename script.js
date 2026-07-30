@@ -39,8 +39,10 @@ const actionButtons = document.getElementById('action-buttons');
 const btnHit = document.getElementById('btn-hit');
 const btnStand = document.getElementById('btn-stand');
 const bettingControls = document.getElementById('betting-controls');
+const betLabel = document.getElementById('bet-label');
 const betInput = document.getElementById('bet-input');
 const btnBet = document.getElementById('btn-bet');
+const btnReload = document.getElementById('btn-reload');
 
 // Variables de Session
 let roomCode = "";
@@ -48,7 +50,7 @@ let playerName = "";
 let isHost = false;
 let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
 let gameState = null;
-let isDealing = false; 
+let isDealing = false;
 
 // ==========================================
 // 1. GESTION DU LOBBY
@@ -76,7 +78,8 @@ btnCreateRoom.addEventListener('click', async () => {
       turnOrder: [myPlayerId],
       activeTurnIndex: 0,
       players: {
-        [myPlayerId]: { name: playerName, chips: 1000, bet: 0, status: 'active' }
+        // Initialisation avec reloads à 0
+        [myPlayerId]: { name: playerName, chips: 1000, bet: 0, status: 'active', reloads: 0 }
       }
     });
     enterGameRoom();
@@ -118,7 +121,7 @@ btnJoinRoom.addEventListener('click', async () => {
       newTurnOrder.push(myPlayerId);
 
       await update(ref(db, 'rooms/' + roomCode), {
-        [`players/${myPlayerId}`]: { name: playerName, chips: 1000, bet: 0, status: 'active' },
+        [`players/${myPlayerId}`]: { name: playerName, chips: 1000, bet: 0, status: 'active', reloads: 0 },
         turnOrder: newTurnOrder
       });
 
@@ -166,7 +169,7 @@ function updateUI() {
         <div class="cards-container" id="p-${pId}-cards"></div>
         <div class="player-info" id="p-${pId}-info">
           <span class="player-name" id="p-${pId}-name"></span>
-          <span class="player-chips">Score: <span id="p-${pId}-score">0</span> | <span id="p-${pId}-chips"></span> €</span>
+          <span class="player-chips">Score: <span id="p-${pId}-score">0</span> | <span id="p-${pId}-chips"></span> € <span style="font-size:0.8em; color:#aaa;">(♻️ <span id="p-${pId}-reloads"></span>)</span></span>
           <span id="p-${pId}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
         </div>
       `;
@@ -179,6 +182,7 @@ function updateUI() {
     const p = gameState.players[pId];
     document.getElementById(`p-${pId}-name`).textContent = p.name + (pId === myPlayerId ? " (Vous)" : "");
     document.getElementById(`p-${pId}-chips`).textContent = p.chips;
+    document.getElementById(`p-${pId}-reloads`).textContent = p.reloads || 0;
     
     // Affichage des messages de fin ou des mises
     if (gameState.phase === 'resolved' && p.resultMsg) {
@@ -227,7 +231,6 @@ async function checkPhase() {
   if (gameState.phase === 'waiting') {
     const count = gameState.turnOrder.length;
     
-    // VERIFICATION DU SALON PLEIN ET MESSAGE D'ATTENTE
     if (count >= gameState.maxPlayers) {
       if (isHost) {
         elGameMessage.textContent = "Tout le monde est là ! Vous pouvez lancer la partie.";
@@ -244,9 +247,22 @@ async function checkPhase() {
     if (activeId === myPlayerId) {
       bettingControls.classList.remove('hidden');
       const maxBet = gameState.players[myPlayerId].chips;
-      betInput.max = maxBet;
-      betInput.value = Math.min(50, maxBet);
-      elGameMessage.textContent = `À vous de miser (Solde: ${maxBet} €)`;
+      
+      // LOGIQUE DE FAILLITE
+      if (maxBet < 10) {
+        betLabel.classList.add('hidden');
+        btnBet.classList.add('hidden');
+        btnReload.classList.remove('hidden');
+        elGameMessage.textContent = `Fonds insuffisants. Rechargez pour continuer !`;
+      } else {
+        betLabel.classList.remove('hidden');
+        btnBet.classList.remove('hidden');
+        btnReload.classList.add('hidden');
+        
+        betInput.max = maxBet;
+        betInput.value = Math.min(50, maxBet);
+        elGameMessage.textContent = `À vous de miser (Solde: ${maxBet} €)`;
+      }
     } else {
       const activeName = gameState.players[activeId].name;
       elGameMessage.textContent = `En attente de la mise de ${activeName}...`;
@@ -318,6 +334,18 @@ btnStart.addEventListener('click', async () => {
     updates[`players/${pId}/resultMsg`] = null;
   });
   await update(ref(db, 'rooms/' + roomCode), updates);
+});
+
+// ACTION DE RECHARGEMENT
+btnReload.addEventListener('click', async () => {
+  const myData = gameState.players[myPlayerId];
+  const currentReloads = myData.reloads || 0;
+  
+  // On ajoute 1000 jetons au solde restant (au cas où il resterait par ex 5€)
+  await update(ref(db, 'rooms/' + roomCode + '/players/' + myPlayerId), {
+    chips: (myData.chips || 0) + 1000,
+    reloads: currentReloads + 1
+  });
 });
 
 btnBet.addEventListener('click', async () => {
@@ -448,7 +476,7 @@ function createDeck() {
 function createCardElement(card) {
   const cardEl = document.createElement('div');
   cardEl.classList.add('card', 'deal-animation');
-  if(!card) return cardEl; // Sécurité
+  if(!card) return cardEl; 
   
   const backFace = document.createElement('div');
   backFace.classList.add('card-face', 'card-back');
@@ -470,22 +498,17 @@ function createCardElement(card) {
 function renderCards(container, cards, hideSecond = false) {
   if (!cards) cards = [];
   
-  // On retire les cartes en trop si on recommence une nouvelle main
   while(container.children.length > cards.length) {
     container.removeChild(container.lastChild);
   }
   
-  // On ajoute les nouvelles cartes
   for(let i = container.children.length; i < cards.length; i++) {
     let cardEl = createCardElement(cards[i]);
     container.appendChild(cardEl);
   }
   
-  // On utilise un très court délai (50ms) pour laisser le navigateur intégrer la carte
   setTimeout(() => {
     Array.from(container.children).forEach((cardEl, i) => {
-      // LA CORRECTION EST ICI : On force le retrait de l'animation CSS 
-      // pour "débloquer" la carte et autoriser la rotation 3D.
       cardEl.classList.remove('deal-animation');
       
       if (hideSecond && i === 1) {
