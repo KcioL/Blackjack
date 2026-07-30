@@ -479,18 +479,20 @@ function renderCards(container, cards, hideSecond = false) {
   for(let i = container.children.length; i < cards.length; i++) {
     let cardEl = createCardElement(cards[i]);
     container.appendChild(cardEl);
-    
-    // Cette ligne force le navigateur à calculer la position de la carte AVANT d'ajouter la classe 'flipped'. 
-    // Ça garantit à 100% que l'animation de retournement va se lancer et qu'aucune carte ne restera bleue.
-    void cardEl.offsetWidth; 
   }
   
-  // On s'assure que toutes les cartes ont la classe pour être face visible (sauf la 2ème du croupier)
-  Array.from(container.children).forEach((cardEl, i) => {
-    if (hideSecond && i === 1) {
-      cardEl.classList.remove('flipped');
-    } else {
-      cardEl.classList.add('flipped');
-    }
-  });
+  // On utilise un très court délai (50ms) pour laisser le navigateur intégrer la carte
+  setTimeout(() => {
+    Array.from(container.children).forEach((cardEl, i) => {
+      // LA CORRECTION EST ICI : On force le retrait de l'animation CSS 
+      // pour "débloquer" la carte et autoriser la rotation 3D.
+      cardEl.classList.remove('deal-animation');
+      
+      if (hideSecond && i === 1) {
+        cardEl.classList.remove('flipped');
+      } else {
+        cardEl.classList.add('flipped');
+      }
+    });
+  }, 50);
 }
