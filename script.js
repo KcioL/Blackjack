@@ -48,7 +48,7 @@ let playerName = "";
 let isHost = false;
 let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
 let gameState = null;
-let isDealing = false; // Sécurité pour empêcher le Croupier de distribuer 2 fois
+let isDealing = false;
 
 // ==========================================
 // 1. GESTION DU LOBBY
@@ -226,10 +226,18 @@ async function checkPhase() {
 
   if (gameState.phase === 'waiting') {
     const count = gameState.turnOrder.length;
-    elGameMessage.textContent = `En attente de joueurs... (${count}/${gameState.maxPlayers})`;
-    if (count === gameState.maxPlayers && isHost) {
-      btnStart.textContent = "Lancer la partie";
-      btnStart.classList.remove('hidden');
+    
+    // VERIFICATION DU SALON PLEIN (Correction de ton premier problème)
+    if (count >= gameState.maxPlayers) {
+      if (isHost) {
+        elGameMessage.textContent = "Tout le monde est là ! Vous pouvez lancer la partie.";
+        btnStart.textContent = "Lancer la partie";
+        btnStart.classList.remove('hidden');
+      } else {
+        elGameMessage.textContent = "En attente du lancement de la partie par l'hôte...";
+      }
+    } else {
+      elGameMessage.textContent = `En attente de joueurs... (${count}/${gameState.maxPlayers})`;
     }
   }
   else if (gameState.phase === 'betting') {
@@ -440,8 +448,11 @@ function createDeck() {
 function createCardElement(card) {
   const cardEl = document.createElement('div');
   cardEl.classList.add('card', 'deal-animation');
+  if(!card) return cardEl; // Sécurité si la carte n'est pas trouvée
+  
   const backFace = document.createElement('div');
   backFace.classList.add('card-face', 'card-back');
+  
   const frontFace = document.createElement('div');
   frontFace.classList.add('card-face', 'card-front');
   if (card.isRed) frontFace.classList.add('red');
@@ -456,20 +467,32 @@ function createCardElement(card) {
   return cardEl;
 }
 
+// NOUVELLE FONCTION RENDER CARDS (Correction de ton deuxième problème)
 function renderCards(container, cards, hideSecond = false) {
+  if (!cards) cards = [];
+  
+  // 1. Retirer les cartes en trop (utile quand on lance une nouvelle main)
   while(container.children.length > cards.length) {
     container.removeChild(container.lastChild);
   }
+  
+  // 2. Ajouter les cartes manquantes dans l'interface
   for(let i = container.children.length; i < cards.length; i++) {
     let cardEl = createCardElement(cards[i]);
     container.appendChild(cardEl);
+  }
+  
+  // 3. Forcer le bon affichage de TOUTES les cartes (retournée ou non)
+  Array.from(container.children).forEach((cardEl, i) => {
     if (hideSecond && i === 1) {
-      // Le croupier cache sa 2ème carte
+      cardEl.classList.remove('flipped'); // Cache la 2ème carte du croupier
     } else {
-      setTimeout(() => cardEl.classList.add('flipped'), 50);
+      // On s'assure qu'elle est bien retournée (face visible) pour tout le monde
+      setTimeout(() => {
+        if (!cardEl.classList.contains('flipped')) {
+          cardEl.classList.add('flipped');
+        }
+      }, 30);
     }
-  }
-  if (!hideSecond && container.children.length > 1) {
-    container.children[1].classList.add('flipped');
-  }
+  });
 }
