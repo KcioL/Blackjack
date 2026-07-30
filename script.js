@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-// Configuration Firebase intégrée depuis ta capture d'écran
+// Configuration Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyDghzmm1njN43LyBcBUqpL7g0FowgX4YNS",
   authDomain: "blackjack-13715.firebaseapp.com",
@@ -17,13 +17,6 @@ const db = getDatabase(app);
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-
-let deck = [];
-let players = [];
-let dealerCards = [];
-
-let activePlayerIndex = 0;
-let currentPhase = 'idle'; 
 
 // --- DOM : LOBBY ---
 const lobbyScreen = document.getElementById('lobby-screen');
@@ -45,7 +38,6 @@ const btnStart = document.getElementById('btn-start');
 const actionButtons = document.getElementById('action-buttons');
 const btnHit = document.getElementById('btn-hit');
 const btnStand = document.getElementById('btn-stand');
-
 const bettingControls = document.getElementById('betting-controls');
 const betInput = document.getElementById('bet-input');
 const btnBet = document.getElementById('btn-bet');
@@ -55,10 +47,11 @@ let roomCode = "";
 let playerName = "";
 let isHost = false;
 let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
-let isGameStarted = false; // Bloque la modification de l'UI de la table une fois en jeu
+let gameState = null;
+let isDealing = false; // Sécurité pour empêcher le Croupier de distribuer 2 fois
 
 // ==========================================
-// GESTION DU LOBBY ET SYNCHRONISATION
+// 1. GESTION DU LOBBY
 // ==========================================
 function generateRoomCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -76,14 +69,14 @@ btnCreateRoom.addEventListener('click', async () => {
   isHost = true;
   
   try {
-    // On crée la salle avec le nombre max de joueurs défini par l'Hôte
     await set(ref(db, 'rooms/' + roomCode), {
       phase: 'waiting',
       host: playerName,
       maxPlayers: maxPlayers,
-      createdAt: Date.now(),
+      turnOrder: [myPlayerId],
+      activeTurnIndex: 0,
       players: {
-        [myPlayerId]: { name: playerName, chips: 1000 }
+        [myPlayerId]: { name: playerName, chips: 1000, bet: 0, status: 'active' }
       }
     });
     enterGameRoom();
@@ -108,9 +101,8 @@ btnJoinRoom.addEventListener('click', async () => {
     const snapshot = await get(ref(db, 'rooms/' + roomCode));
     if (snapshot.exists()) {
       const data = snapshot.val();
-      const currentPlayersCount = data.players ? Object.keys(data.players).length : 0;
+      const currentPlayersCount = data.turnOrder ? data.turnOrder.length : 0;
       
-      // Sécurité : Vérifier si la partie a commencé ou est pleine
       if (data.phase !== 'waiting') {
         lobbyError.textContent = "La partie a déjà commencé.";
         lobbyError.classList.remove('hidden');
@@ -122,15 +114,18 @@ btnJoinRoom.addEventListener('click', async () => {
         return;
       }
 
-      // Ajout du joueur dans Firebase
-      await update(ref(db, 'rooms/' + roomCode + '/players'), {
-        [myPlayerId]: { name: playerName, chips: 1000 }
+      let newTurnOrder = data.turnOrder || [];
+      newTurnOrder.push(myPlayerId);
+
+      await update(ref(db, 'rooms/' + roomCode), {
+        [`players/${myPlayerId}`]: { name: playerName, chips: 1000, bet: 0, status: 'active' },
+        turnOrder: newTurnOrder
       });
 
       isHost = false;
       enterGameRoom();
     } else {
-      lobbyError.textContent = "Ce code de salon n'existe pas.";
+      lobbyError.textContent = "Ce code n'existe pas.";
       lobbyError.classList.remove('hidden');
     }
   } catch (error) {
@@ -144,95 +139,279 @@ function enterGameRoom() {
   lobbyScreen.classList.add('hidden');
   gameScreen.classList.remove('hidden');
   displayRoomCode.textContent = roomCode;
-  lobbyError.classList.add('hidden');
   
-  // Écoute des changements de la salle en temps réel
+  // ÉCOUTEUR PRINCIPAL EN TEMPS RÉEL
   onValue(ref(db, 'rooms/' + roomCode), (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
+    gameState = snapshot.val();
+    if (!gameState) return;
 
-    const playerIds = Object.keys(data.players || {});
-    const currentPlayersCount = playerIds.length;
-
-    // On met à jour l'affichage des joueurs TANT QUE la partie n'a pas commencé
-    if (!isGameStarted) {
-      setupTableFromFirebase(data.players);
-
-      if (data.phase === 'waiting') {
-        elGameMessage.textContent = `En attente de joueurs... (${currentPlayersCount}/${data.maxPlayers})`;
-        
-        // Si le salon est plein
-        if (currentPlayersCount === data.maxPlayers) {
-          if (isHost) {
-            elGameMessage.textContent = "Tout le monde est là ! Vous pouvez lancer la partie.";
-            btnStart.classList.remove('hidden');
-          } else {
-            elGameMessage.textContent = "Tout le monde est là ! En attente de l'hôte pour lancer...";
-            btnStart.classList.add('hidden');
-          }
-        } else {
-          btnStart.classList.add('hidden');
-        }
-      } 
-      else if (data.phase === 'playing') {
-        // L'hôte a cliqué sur "Lancer la partie"
-        isGameStarted = true;
-        btnStart.classList.add('hidden');
-        currentPhase = 'betting';
-        activePlayerIndex = 0;
-        processBettingPhase();
-      }
-    }
+    updateUI();
+    checkPhase();
   });
 }
 
-// Transforme l'objet Firebase en un tableau "players" utilisable par le jeu
-function setupTableFromFirebase(playersObj) {
-  elPlayersContainer.innerHTML = '';
-  players = [];
-  
-  let i = 0;
-  for (const pId in playersObj) {
-    const pData = playersObj[pId];
-    
-    const pZone = document.createElement('div');
-    pZone.className = 'player-zone';
-    pZone.innerHTML = `
-      <div class="cards-container" id="p${i}-cards"></div>
-      <div class="player-info" id="p${i}-info">
-        <span class="player-name">${pData.name} ${pId === myPlayerId ? '(Vous)' : ''}</span>
-        <span class="player-chips">Score: <span id="p${i}-score">0</span> | <span id="p${i}-chips">${pData.chips}</span> €</span>
-        <span id="p${i}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
-      </div>
-    `;
-    elPlayersContainer.appendChild(pZone);
+// ==========================================
+// 2. SYNCHRONISATION VISUELLE (INTERFACE)
+// ==========================================
+function updateUI() {
+  if (!gameState || !gameState.turnOrder) return;
 
-    players.push({
-      id: i, firebaseId: pId, name: pData.name,
-      cards: [], bet: 0, chips: pData.chips,
-      elCards: document.getElementById(`p${i}-cards`),
-      elScore: document.getElementById(`p${i}-score`),
-      elChips: document.getElementById(`p${i}-chips`),
-      elBetDisplay: document.getElementById(`p${i}-bet`),
-      elInfo: document.getElementById(`p${i}-info`),
-      status: 'active'
+  // Création des zones joueurs si manquantes
+  if (elPlayersContainer.children.length !== gameState.turnOrder.length) {
+    elPlayersContainer.innerHTML = '';
+    gameState.turnOrder.forEach((pId) => {
+      const pZone = document.createElement('div');
+      pZone.className = 'player-zone';
+      pZone.innerHTML = `
+        <div class="cards-container" id="p-${pId}-cards"></div>
+        <div class="player-info" id="p-${pId}-info">
+          <span class="player-name" id="p-${pId}-name"></span>
+          <span class="player-chips">Score: <span id="p-${pId}-score">0</span> | <span id="p-${pId}-chips"></span> €</span>
+          <span id="p-${pId}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
+        </div>
+      `;
+      elPlayersContainer.appendChild(pZone);
     });
-    i++;
+  }
+
+  // Mise à jour du contenu des joueurs
+  gameState.turnOrder.forEach((pId, index) => {
+    const p = gameState.players[pId];
+    document.getElementById(`p-${pId}-name`).textContent = p.name + (pId === myPlayerId ? " (Vous)" : "");
+    document.getElementById(`p-${pId}-chips`).textContent = p.chips;
+    
+    // Affichage des messages de fin ou des mises
+    if (gameState.phase === 'resolved' && p.resultMsg) {
+      document.getElementById(`p-${pId}-bet`).textContent = p.resultMsg;
+    } else {
+      document.getElementById(`p-${pId}-bet`).textContent = `Mise: ${p.bet} €`;
+    }
+
+    // Mise à jour des cartes
+    renderCards(document.getElementById(`p-${pId}-cards`), p.cards || [], false);
+    document.getElementById(`p-${pId}-score`).textContent = calculateScore(p.cards || []);
+
+    // Surbrillance du tour actif
+    const infoBox = document.getElementById(`p-${pId}-info`);
+    if ((gameState.phase === 'betting' || gameState.phase === 'playing') && gameState.activeTurnIndex === index) {
+      infoBox.classList.add('active-player-highlight');
+    } else {
+      infoBox.classList.remove('active-player-highlight');
+    }
+  });
+
+  // Mise à jour des cartes du Croupier
+  const hideDealerSecondCard = (gameState.phase === 'playing');
+  renderCards(elDealerCards, gameState.dealerCards || [], hideDealerSecondCard);
+  
+  if (hideDealerSecondCard && gameState.dealerCards && gameState.dealerCards.length > 0) {
+    elDealerScore.textContent = calculateScore([gameState.dealerCards[0]]);
+  } else {
+    elDealerScore.textContent = calculateScore(gameState.dealerCards || []);
   }
 }
 
-// L'hôte déclenche le début de la partie pour tout le monde
+// ==========================================
+// 3. LOGIQUE DES PHASES (MOTEUR DE JEU)
+// ==========================================
+async function checkPhase() {
+  if (!gameState || !gameState.turnOrder) return;
+  
+  const activeId = gameState.turnOrder[gameState.activeTurnIndex];
+  
+  // Cache tout par défaut
+  actionButtons.classList.add('hidden');
+  bettingControls.classList.add('hidden');
+  btnStart.classList.add('hidden');
+
+  if (gameState.phase === 'waiting') {
+    const count = gameState.turnOrder.length;
+    elGameMessage.textContent = `En attente de joueurs... (${count}/${gameState.maxPlayers})`;
+    if (count === gameState.maxPlayers && isHost) {
+      btnStart.textContent = "Lancer la partie";
+      btnStart.classList.remove('hidden');
+    }
+  }
+  else if (gameState.phase === 'betting') {
+    if (activeId === myPlayerId) {
+      bettingControls.classList.remove('hidden');
+      const maxBet = gameState.players[myPlayerId].chips;
+      betInput.max = maxBet;
+      betInput.value = Math.min(50, maxBet);
+      elGameMessage.textContent = `À vous de miser (Solde: ${maxBet} €)`;
+    } else {
+      const activeName = gameState.players[activeId].name;
+      elGameMessage.textContent = `En attente de la mise de ${activeName}...`;
+    }
+  }
+  else if (gameState.phase === 'dealing') {
+    elGameMessage.textContent = "Distribution des cartes...";
+    if (isHost && !isDealing) {
+      isDealing = true;
+      let newDeck = createDeck();
+      let updates = {};
+      
+      gameState.turnOrder.forEach(pId => {
+        updates[`players/${pId}/cards`] = [newDeck.pop(), newDeck.pop()];
+      });
+      
+      updates['dealerCards'] = [newDeck.pop(), newDeck.pop()];
+      updates['deck'] = newDeck;
+      updates['phase'] = 'playing';
+      updates['activeTurnIndex'] = 0;
+      
+      await update(ref(db, 'rooms/' + roomCode), updates);
+      isDealing = false;
+    }
+  }
+  else if (gameState.phase === 'playing') {
+    const pScore = calculateScore(gameState.players[activeId].cards || []);
+    
+    if (activeId === myPlayerId) {
+      if (pScore < 21) {
+        actionButtons.classList.remove('hidden');
+        elGameMessage.textContent = "À vous de jouer : Tirer ou Rester ?";
+      } else {
+        elGameMessage.textContent = "Blackjack / Bust ! Passage au joueur suivant...";
+        // Auto-passe au bout d'une seconde si 21+
+        if (gameState.players[myPlayerId].status !== 'stand' && gameState.players[myPlayerId].status !== 'bust') {
+          setTimeout(endMyTurn, 1000, pScore > 21 ? 'bust' : 'stand');
+        }
+      }
+    } else {
+      elGameMessage.textContent = `Au tour de ${gameState.players[activeId].name}...`;
+    }
+  }
+  else if (gameState.phase === 'dealer_turn') {
+    elGameMessage.textContent = "Tour du croupier...";
+    if (isHost && !isDealing) {
+      isDealing = true;
+      playDealerTurn();
+    }
+  }
+  else if (gameState.phase === 'resolved') {
+    elGameMessage.textContent = "Fin de la main.";
+    if (isHost) {
+      btnStart.textContent = "Nouvelle main";
+      btnStart.classList.remove('hidden');
+    }
+  }
+}
+
+// ==========================================
+// 4. ACTIONS DES JOUEURS
+// ==========================================
 btnStart.addEventListener('click', async () => {
+  let updates = { phase: 'betting', activeTurnIndex: 0, deck: [], dealerCards: [] };
+  gameState.turnOrder.forEach(pId => {
+    updates[`players/${pId}/bet`] = 0;
+    updates[`players/${pId}/cards`] = [];
+    updates[`players/${pId}/status`] = 'active';
+    updates[`players/${pId}/resultMsg`] = null;
+  });
+  await update(ref(db, 'rooms/' + roomCode), updates);
+});
+
+btnBet.addEventListener('click', async () => {
+  const bet = parseInt(betInput.value);
+  const myData = gameState.players[myPlayerId];
+  
+  if (bet > myData.chips || bet < 10) return alert("Mise invalide.");
+  
+  let updates = {};
+  updates[`players/${myPlayerId}/bet`] = bet;
+  updates[`players/${myPlayerId}/chips`] = myData.chips - bet;
+  
+  const nextIndex = gameState.activeTurnIndex + 1;
+  if (nextIndex >= gameState.turnOrder.length) {
+    updates['phase'] = 'dealing';
+    updates['activeTurnIndex'] = 0;
+  } else {
+    updates['activeTurnIndex'] = nextIndex;
+  }
+  await update(ref(db, 'rooms/' + roomCode), updates);
+});
+
+btnHit.addEventListener('click', async () => {
+  let deck = gameState.deck || [];
+  let myCards = gameState.players[myPlayerId].cards || [];
+  
+  myCards.push(deck.pop());
+  
   await update(ref(db, 'rooms/' + roomCode), {
-    phase: 'playing'
+    'deck': deck,
+    [`players/${myPlayerId}/cards`]: myCards
   });
 });
 
+btnStand.addEventListener('click', () => {
+  endMyTurn('stand');
+});
+
+async function endMyTurn(newStatus) {
+  let updates = { [`players/${myPlayerId}/status`]: newStatus };
+  const nextIndex = gameState.activeTurnIndex + 1;
+  
+  if (nextIndex >= gameState.turnOrder.length) {
+    updates['phase'] = 'dealer_turn';
+  } else {
+    updates['activeTurnIndex'] = nextIndex;
+  }
+  await update(ref(db, 'rooms/' + roomCode), updates);
+}
 
 // ==========================================
-// LOGIQUE DU BLACKJACK LOCAL
+// 5. TOUR DU CROUPIER (Géré par l'Hôte)
 // ==========================================
+async function playDealerTurn() {
+  let currentDeck = gameState.deck || [];
+  let dCards = gameState.dealerCards || [];
+  let dScore = calculateScore(dCards);
+  
+  // Tire tant que < 17
+  while (dScore < 17 && currentDeck.length > 0) {
+    await new Promise(r => setTimeout(r, 1000));
+    dCards.push(currentDeck.pop());
+    dScore = calculateScore(dCards);
+    await update(ref(db, 'rooms/' + roomCode), { dealerCards: dCards, deck: currentDeck });
+  }
+  
+  await new Promise(r => setTimeout(r, 1000)); // Pause finale
+  
+  let updates = {};
+  gameState.turnOrder.forEach(pId => {
+    const p = gameState.players[pId];
+    const pScore = calculateScore(p.cards || []);
+    let winnings = 0;
+    let msg = '';
+    
+    if (p.status === 'bust' || pScore > 21) { msg = 'Buste !'; }
+    else if (pScore === 21 && p.cards.length === 2) {
+      if (dScore === 21 && dCards.length === 2) {
+        winnings = p.bet; msg = 'Égalité (BJ)';
+      } else {
+        winnings = p.bet * 2.5; msg = 'Blackjack !';
+      }
+    } else if (dScore > 21 || pScore > dScore) {
+      winnings = p.bet * 2; msg = 'Gagné !';
+    } else if (pScore === dScore) {
+      winnings = p.bet; msg = 'Égalité';
+    } else {
+      msg = 'Perdu';
+    }
+    
+    updates[`players/${pId}/chips`] = p.chips + winnings;
+    updates[`players/${pId}/resultMsg`] = msg;
+  });
+  
+  updates['phase'] = 'resolved';
+  await update(ref(db, 'rooms/' + roomCode), updates);
+  isDealing = false;
+}
 
+// ==========================================
+// 6. UTILITAIRES 
+// ==========================================
 function calculateScore(cards) {
   let score = 0, aces = 0;
   for (let card of cards) {
@@ -245,25 +424,24 @@ function calculateScore(cards) {
 }
 
 function createDeck() {
-  deck = [];
+  let newDeck = [];
   for (let suit of SUITS) {
     for (let value of VALUES) {
-      deck.push({ value, suit, isRed: suit === '♥' || suit === '♦' });
+      newDeck.push({ value, suit, isRed: suit === '♥' || suit === '♦' });
     }
   }
-  for (let i = deck.length - 1; i > 0; i--) {
+  for (let i = newDeck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+    [newDeck[i], newDeck[j]] = [newDeck[j], newDeck[i]];
   }
+  return newDeck;
 }
 
 function createCardElement(card) {
   const cardEl = document.createElement('div');
   cardEl.classList.add('card', 'deal-animation');
-
   const backFace = document.createElement('div');
   backFace.classList.add('card-face', 'card-back');
-
   const frontFace = document.createElement('div');
   frontFace.classList.add('card-face', 'card-front');
   if (card.isRed) frontFace.classList.add('red');
@@ -278,208 +456,20 @@ function createCardElement(card) {
   return cardEl;
 }
 
-function dealCardToZone(cardData, container) {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      const cardEl = createCardElement(cardData);
-      container.appendChild(cardEl);
-      resolve(cardEl);
-    }, 150);
-  });
-}
-
-function revealCard(cardEl) {
-  cardEl.classList.remove('deal-animation');
-  setTimeout(() => { cardEl.classList.add('flipped'); }, 50);
-}
-
-function updateScores(hideDealerCard = true) {
-  players.forEach(p => p.elScore.textContent = calculateScore(p.cards));
-  if (hideDealerCard && dealerCards.length > 0) elDealerScore.textContent = calculateScore([dealerCards[0]]);
-  else elDealerScore.textContent = calculateScore(dealerCards);
-}
-
-function highlightActivePlayer() {
-  players.forEach(p => p.elInfo.classList.remove('active-player-highlight'));
-  if (activePlayerIndex < players.length) {
-    players[activePlayerIndex].elInfo.classList.add('active-player-highlight');
+function renderCards(container, cards, hideSecond = false) {
+  while(container.children.length > cards.length) {
+    container.removeChild(container.lastChild);
   }
-}
-
-function processBettingPhase() {
-  if (activePlayerIndex >= players.length) {
-    currentPhase = 'playing';
-    bettingControls.classList.add('hidden');
-    startCardDistribution();
-    return;
-  }
-
-  const p = players[activePlayerIndex];
-  highlightActivePlayer();
-  
-  elGameMessage.textContent = `${p.name} : Choisissez votre mise (Solde : ${p.chips} €)`;
-  
-  betInput.max = p.chips;
-  betInput.value = Math.min(50, p.chips); 
-
-  bettingControls.classList.remove('hidden');
-  actionButtons.classList.add('hidden');
-}
-
-btnBet.addEventListener('click', () => {
-  const p = players[activePlayerIndex];
-  let chosenBet = parseInt(betInput.value);
-  
-  if (chosenBet > p.chips || chosenBet < 10) {
-    alert("Mise invalide ou solde insuffisant.");
-    return;
-  }
-
-  p.bet = chosenBet;
-  p.chips -= chosenBet;
-  p.elChips.textContent = p.chips;
-  p.elBetDisplay.textContent = `Mise: ${chosenBet} €`;
-
-  activePlayerIndex++;
-  processBettingPhase(); 
-});
-
-async function startCardDistribution() {
-  createDeck();
-  dealerCards = [];
-  elDealerCards.innerHTML = '';
-  elGameMessage.textContent = "Distribution des cartes...";
-  players.forEach(p => p.elInfo.classList.remove('active-player-highlight'));
-
-  for (let round = 0; round < 2; round++) {
-    for (let p of players) {
-      p.cards.push(deck.pop());
-      const cardEl = await dealCardToZone(p.cards[p.cards.length - 1], p.elCards);
-      revealCard(cardEl); 
-    }
-    dealerCards.push(deck.pop());
-    const dCardEl = await dealCardToZone(dealerCards[dealerCards.length - 1], elDealerCards);
-    if (round === 0) revealCard(dCardEl);
-  }
-
-  updateScores(true);
-  activePlayerIndex = 0;
-  startPlayerTurn();
-}
-
-function startPlayerTurn() {
-  if (activePlayerIndex >= players.length) {
-    players.forEach(p => p.elInfo.classList.remove('active-player-highlight'));
-    playDealerTurn();
-    return;
-  }
-
-  const p = players[activePlayerIndex];
-  highlightActivePlayer();
-  
-  if (calculateScore(p.cards) === 21) {
-    p.status = 'blackjack';
-    elGameMessage.textContent = `Blackjack pour ${p.name} !`;
-    setTimeout(() => { activePlayerIndex++; startPlayerTurn(); }, 1500);
-    return;
-  }
-
-  actionButtons.classList.remove('hidden');
-  elGameMessage.textContent = `À vous de jouer ${p.name} : Tirer ou Rester ?`;
-}
-
-btnHit.addEventListener('click', async () => {
-  actionButtons.classList.add('hidden');
-  const p = players[activePlayerIndex];
-  
-  const newCard = deck.pop();
-  p.cards.push(newCard);
-  
-  const cardEl = await dealCardToZone(newCard, p.elCards);
-  revealCard(cardEl);
-  updateScores(true);
-
-  const score = calculateScore(p.cards);
-  
-  if (score > 21) {
-    p.status = 'bust';
-    elGameMessage.textContent = `Bust ! ${p.name} a sauté.`;
-    setTimeout(() => { activePlayerIndex++; startPlayerTurn(); }, 1500);
-  } else if (score === 21) {
-    p.status = 'stand';
-    setTimeout(() => { activePlayerIndex++; startPlayerTurn(); }, 1000);
-  } else {
-    actionButtons.classList.remove('hidden');
-  }
-});
-
-btnStand.addEventListener('click', () => {
-  players[activePlayerIndex].status = 'stand';
-  activePlayerIndex++;
-  startPlayerTurn();
-});
-
-async function playDealerTurn() {
-  actionButtons.classList.add('hidden');
-  elGameMessage.textContent = "Tour du croupier...";
-  
-  revealCard(elDealerCards.children[1]); 
-  updateScores(false);
-  
-  let dScore = calculateScore(dealerCards);
-  while (dScore < 17) {
-    await new Promise(r => setTimeout(r, 800)); 
-    const newCard = deck.pop();
-    dealerCards.push(newCard);
-    const cardEl = await dealCardToZone(newCard, elDealerCards);
-    revealCard(cardEl);
-    dScore = calculateScore(dealerCards);
-    updateScores(false);
-  }
-
-  resolveBets(dScore);
-}
-
-function resolveBets(dScore) {
-  let message = "";
-  
-  players.forEach((p) => {
-    const pScore = calculateScore(p.cards);
-    let winnings = 0;
-    
-    if (p.status === 'bust') {
-      message += `${p.name} perd. `;
-    } else if (p.status === 'blackjack') {
-      if (dScore === 21 && dealerCards.length === 2) {
-        message += `${p.name} égalité (BJ). `;
-        winnings = p.bet;
-      } else {
-        message += `${p.name} BJ ! `;
-        winnings = p.bet * 2.5; 
-      }
+  for(let i = container.children.length; i < cards.length; i++) {
+    let cardEl = createCardElement(cards[i]);
+    container.appendChild(cardEl);
+    if (hideSecond && i === 1) {
+      // Le croupier cache sa 2ème carte
     } else {
-      if (dScore > 21 || pScore > dScore) {
-        message += `${p.name} gagne ! `;
-        winnings = p.bet * 2; 
-      } else if (pScore === dScore) {
-        message += `${p.name} égalité. `;
-        winnings = p.bet;
-      } else {
-        message += `${p.name} perd. `;
-      }
+      setTimeout(() => cardEl.classList.add('flipped'), 50);
     }
-    
-    p.chips += winnings;
-    p.elChips.textContent = p.chips;
-  });
-
-  elGameMessage.textContent = message;
-  
-  if (isHost) {
-    setTimeout(() => { 
-      // Reset logic to be implemented later for new rounds over Firebase
-      btnStart.classList.remove('hidden'); 
-      btnStart.textContent = "Relancer une main";
-    }, 2000);
+  }
+  if (!hideSecond && container.children.length > 1) {
+    container.children[1].classList.add('flipped');
   }
 }
