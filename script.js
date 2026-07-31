@@ -175,7 +175,8 @@ function updateUI() {
     
     // GESTION DU SCORE CACHÉ SI LE JOUEUR A DOUBLÉ
     let scores = hands.map(h => {
-      if (h.isDoubled && gameState.phase === 'playing') {
+      // CORRECTION : On cache tant que la phase n'est pas "resolved" (terminée)
+      if (h.isDoubled && gameState.phase !== 'resolved') {
         return calculateScore(h.cards.slice(0, 2)) + " + ?";
       }
       return calculateScore(h.cards || []);
@@ -204,8 +205,9 @@ function updateUI() {
     
     hands.forEach((hand, hIdx) => {
         const container = document.getElementById(`p-${pId}-cards-${hIdx}`);
-        // On cache la dernière carte de la main si le joueur a doublé et qu'on est en cours de jeu
-        const hideLast = (hand.isDoubled && gameState.phase === 'playing');
+        
+        // CORRECTION : On cache la dernière carte tant que la partie n'est pas finie
+        const hideLast = (hand.isDoubled && gameState.phase !== 'resolved');
         
         renderCards(container, hand.cards || [], false, hideLast);
         
@@ -280,7 +282,7 @@ async function checkPhase() {
         btnBet.classList.remove('hidden');
         btnReload.classList.add('hidden');
         betInput.max = maxBet;
-        betInput.value = Math.min(100, maxBet);
+        betInput.value = Math.min(50, maxBet);
         elGameMessage.textContent = `À vous de miser (Solde: ${maxBet} €)`;
       }
     } else {
@@ -320,10 +322,9 @@ async function checkPhase() {
         actionButtons.classList.remove('hidden');
         elGameMessage.textContent = p.hands.length > 1 ? `Main ${activeHandIndex + 1} : Tirer ou Rester ?` : "À vous de jouer : Tirer ou Rester ?";
         
-        // CONDITIONS POUR SPLIT ET DOUBLE
         if (currentCards.length === 2) {
           if (p.chips >= currentHand.bet) {
-            btnDouble.classList.remove('hidden'); // Double autorisé sur la 1ère action
+            btnDouble.classList.remove('hidden'); 
             
             let v1 = currentCards[0].value;
             let v2 = currentCards[1].value;
@@ -421,7 +422,6 @@ btnStand.addEventListener('click', () => {
   endHand('stand');
 });
 
-// NOUVELLE ACTION: DOUBLE DOWN
 btnDouble.addEventListener('click', async () => {
   actionButtons.classList.add('hidden');
   const p = gameState.players[myPlayerId];
@@ -431,20 +431,16 @@ btnDouble.addEventListener('click', async () => {
   let currentHand = myHands[activeHandIndex];
   
   let updates = {};
-  // On déduit la mise une seconde fois et on l'ajoute au pot de la main
   updates[`players/${myPlayerId}/chips`] = p.chips - currentHand.bet;
   currentHand.bet *= 2;
   currentHand.isDoubled = true;
   
-  // On tire exactement une seule carte
   currentHand.cards.push(deck.pop());
   
   updates[`players/${myPlayerId}/hands`] = myHands;
   updates['deck'] = deck;
   
   await update(ref(db, 'rooms/' + roomCode), updates);
-  
-  // Le tour se termine obligatoirement après un double
   endHand('stand'); 
 });
 
@@ -630,7 +626,6 @@ function renderCards(container, cards, hideSecond = false, hideLast = false) {
     Array.from(container.children).forEach((cardEl, i) => {
       cardEl.classList.remove('deal-animation');
       
-      // La 2ème carte du croupier OU la dernière carte d'un joueur qui a doublé restent face cachée
       if ((hideSecond && i === 1) || (hideLast && i === cards.length - 1)) {
         cardEl.classList.remove('flipped');
       } else {
