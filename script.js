@@ -79,7 +79,10 @@ btnCreateRoom.addEventListener('click', async () => {
       turnOrder: [myPlayerId],
       activeTurnIndex: 0,
       players: {
-        [myPlayerId]: { name: playerName, chips: 1000, bet: 0, status: 'active', reloads: 0 }
+        [myPlayerId]: { 
+          name: playerName, chips: 1000, reloads: 0, activeHandIndex: 0,
+          hands: [{ bet: 0, cards: [], status: 'active', resultMsg: null }] 
+        }
       }
     });
     enterGameRoom();
@@ -110,7 +113,10 @@ btnJoinRoom.addEventListener('click', async () => {
       newTurnOrder.push(myPlayerId);
 
       await update(ref(db, 'rooms/' + roomCode), {
-        [`players/${myPlayerId}`]: { name: playerName, chips: 1000, bet: 0, status: 'active', reloads: 0 },
+        [`players/${myPlayerId}`]: { 
+          name: playerName, chips: 1000, reloads: 0, activeHandIndex: 0,
+          hands: [{ bet: 0, cards: [], status: 'active', resultMsg: null }] 
+        },
         turnOrder: newTurnOrder
       });
 
@@ -144,71 +150,75 @@ function enterGameRoom() {
 function updateUI() {
   if (!gameState || !gameState.turnOrder) return;
 
+  // Création des zones joueurs si manquantes
   if (elPlayersContainer.children.length !== gameState.turnOrder.length) {
     elPlayersContainer.innerHTML = '';
     gameState.turnOrder.forEach((pId) => {
       const pZone = document.createElement('div');
       pZone.className = 'player-zone';
-      pZone.innerHTML = `
-        <div class="hands-wrapper" style="display: flex; gap: 20px; justify-content: center;">
-          <div class="cards-container" id="p-${pId}-cards" style="transition: box-shadow 0.3s; border-radius: 8px;"></div>
-          <div class="cards-container hidden" id="p-${pId}-split-cards" style="transition: box-shadow 0.3s; border-radius: 8px;"></div>
-        </div>
-        <div class="player-info" id="p-${pId}-info">
-          <span class="player-name" id="p-${pId}-name"></span>
-          <span class="player-chips">Score: <span id="p-${pId}-score">0</span> | <span id="p-${pId}-chips"></span> € <span style="font-size:0.8em; color:#aaa;">(♻️ <span id="p-${pId}-reloads"></span>)</span></span>
-          <span id="p-${pId}-bet" style="color: #ffd700; font-size: 0.85em;">Mise: 0 €</span>
-        </div>
-      `;
+      pZone.id = `pzone-${pId}`;
       elPlayersContainer.appendChild(pZone);
     });
   }
 
   gameState.turnOrder.forEach((pId, index) => {
     const p = gameState.players[pId];
-    document.getElementById(`p-${pId}-name`).textContent = p.name + (pId === myPlayerId ? " (Vous)" : "");
-    document.getElementById(`p-${pId}-chips`).textContent = p.chips;
-    document.getElementById(`p-${pId}-reloads`).textContent = p.reloads || 0;
+    const pZone = document.getElementById(`pzone-${pId}`);
     
-    // GESTION DE L'AFFICHAGE DU SCORE ET DE LA MISE EN CAS DE SPLIT
-    let scoreTxt = calculateScore(p.cards || []).toString();
-    let betTxt = `Mise: ${p.bet} €`;
-    const splitContainer = document.getElementById(`p-${pId}-split-cards`);
+    let hands = p.hands || [{ bet: 0, cards: [] }]; 
     
-    renderCards(document.getElementById(`p-${pId}-cards`), p.cards || [], false);
-
-    if (p.splitCards) {
-      splitContainer.classList.remove('hidden');
-      renderCards(splitContainer, p.splitCards, false);
-      scoreTxt += ` | ${calculateScore(p.splitCards)}`;
-      betTxt = `Mises: ${p.bet} € | ${p.splitBet} €`;
-    } else {
-      splitContainer.classList.add('hidden');
+    // Construction dynamique de l'HTML pour supporter de multiples mains
+    let handsHtml = `<div class="hands-wrapper" style="display: flex; gap: 20px; justify-content: center; flex-wrap: wrap;">`;
+    hands.forEach((hand, hIdx) => {
+        handsHtml += `<div class="cards-container" id="p-${pId}-cards-${hIdx}" style="transition: box-shadow 0.3s; border-radius: 8px; padding: 5px;"></div>`;
+    });
+    handsHtml += `</div>`;
+    
+    let scores = hands.map(h => calculateScore(h.cards || [])).join(" | ");
+    let bets = hands.map(h => h.bet).join(" € | ") + (hands.length > 0 ? " €" : "");
+    if (gameState.phase === 'resolved') {
+        bets = hands.map(h => h.resultMsg || '').join(" | ");
     }
-
-    document.getElementById(`p-${pId}-score`).textContent = scoreTxt;
-
-    if (gameState.phase === 'resolved' && p.resultMsg) {
-      document.getElementById(`p-${pId}-bet`).textContent = p.resultMsg;
+    
+    let infoHtml = `
+      <div class="player-info" id="p-${pId}-info">
+        <span class="player-name">${p.name}${pId === myPlayerId ? " (Vous)" : ""}</span>
+        <span class="player-chips">Score: <span>${scores}</span> | <span>${p.chips}</span> € <span style="font-size:0.8em; color:#aaa;">(♻️ ${p.reloads || 0})</span></span>
+        <span style="color: #ffd700; font-size: 0.85em;">${bets}</span>
+      </div>
+    `;
+    
+    // Remplacement intelligent du code HTML pour éviter de casser les animations
+    let handsWrapper = pZone.querySelector('.hands-wrapper');
+    if (!handsWrapper || handsWrapper.children.length !== hands.length) {
+        pZone.innerHTML = handsHtml + infoHtml;
     } else {
-      document.getElementById(`p-${pId}-bet`).textContent = betTxt;
+        let infoBox = pZone.querySelector('.player-info');
+        infoBox.outerHTML = infoHtml; 
     }
+    
+    // Rendu des cartes dans chaque main de ce joueur
+    hands.forEach((hand, hIdx) => {
+        const container = document.getElementById(`p-${pId}-cards-${hIdx}`);
+        renderCards(container, hand.cards || [], false);
+        
+        // Surbrillance de la main précise qui est en train d'être jouée
+        if ((gameState.phase === 'playing') && gameState.activeTurnIndex === index) {
+            if (hIdx === (p.activeHandIndex || 0)) {
+                container.style.boxShadow = '0 0 15px #ffd700';
+            } else {
+                container.style.boxShadow = 'none';
+            }
+        } else {
+            container.style.boxShadow = 'none';
+        }
+    });
 
-    // SURBRILLANCE DYNAMIQUE (Pour le joueur, et pour sa main active s'il a Split)
     const infoBox = document.getElementById(`p-${pId}-info`);
-    const hand1Box = document.getElementById(`p-${pId}-cards`);
-    const hand2Box = document.getElementById(`p-${pId}-split-cards`);
-    
-    infoBox.classList.remove('active-player-highlight');
-    hand1Box.style.boxShadow = 'none';
-    hand2Box.style.boxShadow = 'none';
-
     if ((gameState.phase === 'betting' || gameState.phase === 'playing') && gameState.activeTurnIndex === index) {
       infoBox.classList.add('active-player-highlight');
-      if (gameState.phase === 'playing' && p.splitCards) {
-        if ((p.activeHand || 1) === 1) hand1Box.style.boxShadow = '0 0 15px #ffd700';
-        else hand2Box.style.boxShadow = '0 0 15px #ffd700';
-      }
+    } else {
+      infoBox.classList.remove('active-player-highlight');
     }
   });
 
@@ -276,7 +286,13 @@ async function checkPhase() {
       isDealing = true;
       let newDeck = createDeck();
       let updates = {};
-      gameState.turnOrder.forEach(pId => { updates[`players/${pId}/cards`] = [newDeck.pop(), newDeck.pop()]; });
+      
+      gameState.turnOrder.forEach(pId => { 
+        let h = gameState.players[pId].hands || [{ bet: 0 }];
+        h[0].cards = [newDeck.pop(), newDeck.pop()];
+        updates[`players/${pId}/hands`] = h;
+      });
+      
       updates['dealerCards'] = [newDeck.pop(), newDeck.pop()];
       updates['deck'] = newDeck;
       updates['phase'] = 'playing';
@@ -287,31 +303,30 @@ async function checkPhase() {
   }
   else if (gameState.phase === 'playing') {
     const p = gameState.players[activeId];
-    const activeHand = p.activeHand || 1;
-    let currentCards = activeHand === 1 ? (p.cards || []) : (p.splitCards || []);
+    const activeHandIndex = p.activeHandIndex || 0;
+    const currentHand = p.hands[activeHandIndex];
+    const currentCards = currentHand.cards || [];
     const pScore = calculateScore(currentCards);
     
     if (activeId === myPlayerId) {
       if (pScore < 21) {
         actionButtons.classList.remove('hidden');
-        elGameMessage.textContent = p.splitCards ? `Main ${activeHand} : Tirer ou Rester ?` : "À vous de jouer : Tirer ou Rester ?";
+        elGameMessage.textContent = p.hands.length > 1 ? `Main ${activeHandIndex + 1} : Tirer ou Rester ?` : "À vous de jouer : Tirer ou Rester ?";
         
-        // CHECK ELIGIBILITE POUR LE SPLIT
-        if (p.cards.length === 2 && !p.splitCards && activeHand === 1) {
-          let v1 = p.cards[0].value;
-          let v2 = p.cards[1].value;
+        // CHECK SPLIT - Autorisé à l'infini sur des paires tant qu'il y a des jetons
+        if (currentCards.length === 2) {
+          let v1 = currentCards[0].value;
+          let v2 = currentCards[1].value;
           let isSameValue = (v1 === v2) || (['10','J','Q','K'].includes(v1) && ['10','J','Q','K'].includes(v2));
-          if (isSameValue && p.chips >= p.bet) {
+          if (isSameValue && p.chips >= currentHand.bet) {
             btnSplit.classList.remove('hidden');
           }
         }
       } else {
-        let msg = (pScore === 21 && currentCards.length === 2 && !p.splitCards) ? "Blackjack !" : (pScore > 21 ? "Bust !" : "21 !");
-        elGameMessage.textContent = p.splitCards ? `Main ${activeHand} : ${msg}` : msg;
+        let msg = (pScore === 21 && currentCards.length === 2 && p.hands.length === 1) ? "Blackjack !" : (pScore > 21 ? "Bust !" : "21 !");
+        elGameMessage.textContent = p.hands.length > 1 ? `Main ${activeHandIndex + 1} : ${msg}` : msg;
         
-        // Auto-passe à la main suivante ou joueur suivant après 1 seconde
-        let currentStatus = activeHand === 1 ? p.status : p.splitStatus;
-        if (currentStatus !== 'stand' && currentStatus !== 'bust') {
+        if (currentHand.status !== 'stand' && currentHand.status !== 'bust') {
           setTimeout(() => endHand(pScore > 21 ? 'bust' : 'stand'), 1000);
         }
       }
@@ -341,15 +356,9 @@ async function checkPhase() {
 btnStart.addEventListener('click', async () => {
   let updates = { phase: 'betting', activeTurnIndex: 0, deck: [], dealerCards: [] };
   gameState.turnOrder.forEach(pId => {
-    updates[`players/${pId}/bet`] = 0;
-    updates[`players/${pId}/cards`] = [];
-    updates[`players/${pId}/status`] = 'active';
-    updates[`players/${pId}/resultMsg`] = null;
-    // Nettoyage des données de Split pour la nouvelle manche
-    updates[`players/${pId}/splitCards`] = null;
-    updates[`players/${pId}/splitBet`] = null;
-    updates[`players/${pId}/splitStatus`] = null;
-    updates[`players/${pId}/activeHand`] = 1;
+    // Reset global pour la nouvelle main : Une seule main vide
+    updates[`players/${pId}/hands`] = [{ bet: 0, cards: [], status: 'active', resultMsg: null }];
+    updates[`players/${pId}/activeHandIndex`] = 0;
   });
   await update(ref(db, 'rooms/' + roomCode), updates);
 });
@@ -368,7 +377,8 @@ btnBet.addEventListener('click', async () => {
   if (bet > myData.chips || bet < 10) return;
   
   let updates = {};
-  updates[`players/${myPlayerId}/bet`] = bet;
+  let myHands = [{ bet: bet, cards: [], status: 'active', resultMsg: null }];
+  updates[`players/${myPlayerId}/hands`] = myHands;
   updates[`players/${myPlayerId}/chips`] = myData.chips - bet;
   
   const nextIndex = gameState.activeTurnIndex + 1;
@@ -382,19 +392,17 @@ btnBet.addEventListener('click', async () => {
 });
 
 btnHit.addEventListener('click', async () => {
-  actionButtons.classList.add('hidden'); // Anti-spam click
+  actionButtons.classList.add('hidden'); 
   let deck = gameState.deck || [];
   const p = gameState.players[myPlayerId];
-  let activeHand = p.activeHand || 1;
+  let activeHandIndex = p.activeHandIndex || 0;
+  let myHands = p.hands;
   
-  let cardTarget = activeHand === 1 ? 'cards' : 'splitCards';
-  let myCards = p[cardTarget] || [];
-  
-  myCards.push(deck.pop());
+  myHands[activeHandIndex].cards.push(deck.pop());
   
   await update(ref(db, 'rooms/' + roomCode), {
     'deck': deck,
-    [`players/${myPlayerId}/${cardTarget}`]: myCards
+    [`players/${myPlayerId}/hands`]: myHands
   });
 });
 
@@ -403,65 +411,64 @@ btnStand.addEventListener('click', () => {
   endHand('stand');
 });
 
-// GESTION DU BOUTON SPLIT
+// LOGIQUE SPLIT MULTIPLES
 btnSplit.addEventListener('click', async () => {
   actionButtons.classList.add('hidden');
   const p = gameState.players[myPlayerId];
   let deck = gameState.deck || [];
+  let activeHandIndex = p.activeHandIndex || 0;
+  let myHands = p.hands;
   
-  let card1 = p.cards[0];
-  let card2 = p.cards[1];
+  let currentHand = myHands[activeHandIndex];
+  let card1 = currentHand.cards[0];
+  let card2 = currentHand.cards[1];
   
   let updates = {};
-  updates[`players/${myPlayerId}/chips`] = p.chips - p.bet; // Prélève la 2ème mise
-  updates[`players/${myPlayerId}/splitBet`] = p.bet;
+  updates[`players/${myPlayerId}/chips`] = p.chips - currentHand.bet; 
   
-  // Séparation des cartes et ajout direct d'une nouvelle carte à chacune
-  updates[`players/${myPlayerId}/cards`] = [card1, deck.pop()];
-  updates[`players/${myPlayerId}/splitCards`] = [card2, deck.pop()];
+  currentHand.cards = [card1, deck.pop()];
   
-  updates[`players/${myPlayerId}/activeHand`] = 1;
-  updates[`players/${myPlayerId}/splitStatus`] = 'active';
+  let newHand = {
+    bet: currentHand.bet,
+    cards: [card2, deck.pop()],
+    status: 'active',
+    resultMsg: null
+  };
+  
+  myHands.splice(activeHandIndex + 1, 0, newHand); // Insère la nouvelle main à côté de l'actuelle
+  
+  updates[`players/${myPlayerId}/hands`] = myHands;
   updates['deck'] = deck;
   
   await update(ref(db, 'rooms/' + roomCode), updates);
 });
 
-// Fonction universelle pour terminer une main (gère le passage Main 1 -> Main 2 -> Joueur suivant)
 async function endHand(newStatus) {
   const p = gameState.players[myPlayerId];
-  let updates = {};
+  let myHands = p.hands;
+  let activeHandIndex = p.activeHandIndex || 0;
   
-  if ((p.activeHand || 1) === 1) {
-    updates[`players/${myPlayerId}/status`] = newStatus;
-    if (p.splitCards) {
-      // S'il a split, on passe simplement à la main 2
-      updates[`players/${myPlayerId}/activeHand`] = 2;
-    } else {
-      passTurn(updates);
-    }
+  myHands[activeHandIndex].status = newStatus;
+  
+  let updates = { [`players/${myPlayerId}/hands`]: myHands };
+  
+  if (activeHandIndex + 1 < myHands.length) {
+    updates[`players/${myPlayerId}/activeHandIndex`] = activeHandIndex + 1;
+    await update(ref(db, 'rooms/' + roomCode), updates);
   } else {
-    // Il jouait sa main 2, il a fini son tour
-    updates[`players/${myPlayerId}/splitStatus`] = newStatus;
-    passTurn(updates);
-  }
-  
-  if (Object.keys(updates).length > 0) {
+    // Si toutes les mains du joueur sont finies
+    const nextIndex = gameState.activeTurnIndex + 1;
+    if (nextIndex >= gameState.turnOrder.length) {
+      updates['phase'] = 'dealer_turn';
+    } else {
+      updates['activeTurnIndex'] = nextIndex;
+    }
     await update(ref(db, 'rooms/' + roomCode), updates);
   }
 }
 
-function passTurn(updates) {
-  const nextIndex = gameState.activeTurnIndex + 1;
-  if (nextIndex >= gameState.turnOrder.length) {
-    updates['phase'] = 'dealer_turn';
-  } else {
-    updates['activeTurnIndex'] = nextIndex;
-  }
-}
-
 // ==========================================
-// 5. TOUR DU CROUPIER & RÉSOLUTION DES SPLITS
+// 5. TOUR DU CROUPIER & RÉSOLUTION
 // ==========================================
 async function playDealerTurn() {
   let currentDeck = gameState.deck || [];
@@ -480,38 +487,28 @@ async function playDealerTurn() {
   let updates = {};
   gameState.turnOrder.forEach(pId => {
     const p = gameState.players[pId];
+    let totalWinnings = 0;
     
-    // Fonction interne pour calculer les gains d'UNE main
-    const resolveHand = (handCards, handBet, handStatus) => {
-      const pScore = calculateScore(handCards || []);
-      let winnings = 0; let msg = '';
-      
-      if (handStatus === 'bust' || pScore > 21) { msg = 'Bust'; }
-      else if (pScore === 21 && handCards.length === 2 && !p.splitCards) { 
-        // Le Blackjack paie 3:2 uniquement s'il n'y a pas eu de split
-        if (dScore === 21 && dCards.length === 2) { winnings = handBet; msg = 'Égalité (BJ)'; } 
-        else { winnings = handBet * 2.5; msg = 'Blackjack !'; }
-      } 
-      else if (dScore > 21 || pScore > dScore) { winnings = handBet * 2; msg = 'Gagné'; } 
-      else if (pScore === dScore) { winnings = handBet; msg = 'Égalité'; } 
-      else { msg = 'Perdu'; }
-      return { winnings, msg };
-    };
-
-    // Résolution Main 1
-    let h1 = resolveHand(p.cards, p.bet, p.status);
-    let totalWinnings = h1.winnings;
-    let totalMsg = h1.msg;
-
-    // Résolution Main 2 (si Split)
-    if (p.splitCards) {
-      let h2 = resolveHand(p.splitCards, p.splitBet, p.splitStatus);
-      totalWinnings += h2.winnings;
-      totalMsg = `${h1.msg} | ${h2.msg}`;
-    }
-
+    let myHands = p.hands || [];
+    myHands.forEach(hand => {
+       const pScore = calculateScore(hand.cards || []);
+       let winnings = 0; let msg = '';
+       
+       if (hand.status === 'bust' || pScore > 21) { msg = 'Bust'; }
+       else if (pScore === 21 && (hand.cards || []).length === 2 && myHands.length === 1) {
+         if (dScore === 21 && dCards.length === 2) { winnings = hand.bet; msg = 'Égalité (BJ)'; }
+         else { winnings = hand.bet * 2.5; msg = 'Blackjack !'; }
+       }
+       else if (dScore > 21 || pScore > dScore) { winnings = hand.bet * 2; msg = 'Gagné'; }
+       else if (pScore === dScore) { winnings = hand.bet; msg = 'Égalité'; }
+       else { msg = 'Perdu'; }
+       
+       totalWinnings += winnings;
+       hand.resultMsg = msg;
+    });
+    
     updates[`players/${pId}/chips`] = p.chips + totalWinnings;
-    updates[`players/${pId}/resultMsg`] = totalMsg;
+    updates[`players/${pId}/hands`] = myHands;
   });
   
   updates['phase'] = 'resolved';
@@ -569,17 +566,40 @@ function createCardElement(card) {
   return cardEl;
 }
 
+// LE CORREctif VISUEL EST ICI : On vérifie les cartes individuellement sans purger violemment le HTML
 function renderCards(container, cards, hideSecond = false) {
   if (!cards) cards = [];
-  while(container.children.length > cards.length) { container.removeChild(container.lastChild); }
-  for(let i = container.children.length; i < cards.length; i++) {
-    container.appendChild(createCardElement(cards[i]));
+  
+  while(container.children.length > cards.length) {
+    container.removeChild(container.lastChild);
   }
+  
+  for(let i = 0; i < cards.length; i++) {
+    let expectedStr = cards[i].value + cards[i].suit;
+    
+    if (i < container.children.length) {
+      let cardEl = container.children[i];
+      // Si la carte a changé à cette position, on la remplace !
+      if (cardEl.dataset.card !== expectedStr) {
+        let newCardEl = createCardElement(cards[i]);
+        newCardEl.dataset.card = expectedStr;
+        container.replaceChild(newCardEl, cardEl);
+      }
+    } else {
+      let cardEl = createCardElement(cards[i]);
+      cardEl.dataset.card = expectedStr;
+      container.appendChild(cardEl);
+    }
+  }
+  
   setTimeout(() => {
     Array.from(container.children).forEach((cardEl, i) => {
       cardEl.classList.remove('deal-animation');
-      if (hideSecond && i === 1) cardEl.classList.remove('flipped');
-      else cardEl.classList.add('flipped');
+      if (hideSecond && i === 1) {
+        cardEl.classList.remove('flipped');
+      } else {
+        cardEl.classList.add('flipped');
+      }
     });
   }, 50);
 }
