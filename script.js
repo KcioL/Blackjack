@@ -282,7 +282,7 @@ async function checkPhase() {
         btnBet.classList.remove('hidden');
         btnReload.classList.add('hidden');
         betInput.max = maxBet;
-        betInput.value = Math.min(50, maxBet);
+        betInput.value = Math.min(100, maxBet);
         elGameMessage.textContent = `À vous de miser (Solde: ${maxBet} €)`;
       }
     } else {
