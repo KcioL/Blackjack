@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Blackjack</title>
+  <title>Blackjack - Base En Ligne</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,12 +11,11 @@
   <!-- ÉCRAN DE SALON (LOBBY) -->
   <div id="lobby-screen" class="lobby-screen">
     <div class="lobby-box">
-      <h1>Blackjack</h1>
+      <h1>Blackjack En Ligne</h1>
       
       <label>
         Votre Pseudo :
-        <!-- Suppression du pseudo par défaut, modification du placeholder -->
-        <input type="text" id="lobby-name" maxlength="15" placeholder="Ex : Johnny Sins" value="">
+        <input type="text" id="lobby-name" maxlength="15" placeholder="Laissez vide pour Joueur X" value="">
       </label>
       
       <div class="lobby-actions" style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
@@ -86,6 +85,8 @@
       <div id="action-buttons" class="action-buttons hidden">
         <button id="btn-hit" class="btn btn-secondary">Tirer (Hit)</button>
         <button id="btn-stand" class="btn btn-danger">Rester (Stand)</button>
+        <!-- NOUVEAU BOUTON SPLIT -->
+        <button id="btn-split" class="btn btn-secondary hidden" style="background-color: #8e44ad;">Séparer (Split)</button>
       </div>
     </div>
   </div>
